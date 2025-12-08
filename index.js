@@ -47,10 +47,38 @@ const client = new MongoClient(uri, {
         user.role ="member"
         user.createdAt = new Date()
           const db =  client.db("Club")
+       
    const userCollection = db.collection("users")
+      const exists = await userCollection.findOne({ email: user.email });
 
+     if (exists) {
+        return res.send({ inserted: false });  
+    }
    const result = await userCollection.insertOne(user)
    res.send(result)
+
+     })
+
+      app.get("/clubs", async(req,res)=>{
+        
+        const { search = "", category = "" } = req.query;
+
+    let query = {};
+
+    if (search) {
+      query.clubName = { $regex: search, $options: "i" }; 
+    }
+
+    if (category) {
+      query.category = category;
+    }
+
+
+
+          const db =  client.db("Club")
+          const clubCollection = db.collection("clubs")
+    const result = await clubCollection.find(query).toArray()
+    res.send(result)
 
      })
 

@@ -81,6 +81,28 @@ const client = new MongoClient(uri, {
     res.send(result)
 
      })
+     app.get("/clubs/:id", async(req,res)=>{
+        
+       const id =req.params.id
+
+    const db =  client.db("Club")
+    const clubCollection = db.collection("clubs")
+    const result = await clubCollection.findOne({_id:new ObjectId(id)})
+    res.send(result)
+
+     })
+
+      app.post("/memberships", async(req,res)=>{
+        
+       const memberShip= req.body
+       memberShip.joinedAt = new Date()
+
+    const db =  client.db("Club")
+    const memberShipCollection = db.collection("memberships")
+    const result = await memberShipCollection.insertOne(memberShip)
+    res.send(result)
+
+     })
 
     }catch(error){
        console.log(error)

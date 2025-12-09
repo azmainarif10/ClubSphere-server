@@ -8,7 +8,8 @@ app.use(express.json())
 app.use(cors())
 
 
-
+const stripe = require('stripe')(process.env.Stipe_Key);
+ const YOUR_DOMAIN="http://localhost:5173";
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@ae.lom2zra.mongodb.net/?appName=aE`;
 
@@ -108,9 +109,96 @@ const client = new MongoClient(uri, {
        console.log(error)
     }
     
+  app.post('/create-checkout-session', async (req, res) => {
+    const clubInfo = req.body
+     const amount = parseInt(clubInfo.cost *100)
+  const session = await stripe.checkout.sessions.create({
+   
+        line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            unit_amount: amount,
+            product_data: {
+              name: clubInfo.clubName,
+            }
+          },
+          quantity: 1   
+        }
+      ],
+   
+     metadata:{
+       clubId:clubInfo.clubId
+    },
+    customer_email:clubInfo.email,
+    mode: 'payment',
+    success_url: `${YOUR_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+  });
+
+   res.send({ url :session.url})
+});
+
+ app.get("/payment-success",async(req,res)=>{
+ const sessionId = req.query.session_id;
+
+  const db = client.db("Club");
+
+  const memberShipCollection = db.collection("memberships")
+
+  const session = await stripe.checkout.sessions.retrieve(sessionId);
+  if (session.payment_status !== "paid") {
+    return res.status(400).send({ error: "Payment not completed" });
+  }
+
+  const existing = await memberShipCollection.findOne({
+    clubId: session.metadata.clubId,
+    userEmail: session.customer_email
+  });
+ 
+  if (existing) {
+    return res.status(200).send({ message: "Payment already recorded" });
+  }
 
 
+  const paidMemberShip ={
+      userEmail: session.customer_email,
+      clubId: session.metadata.clubId,
+      status: "active",
+    
+      joinedAt: new Date(),
+      paymentId: session.payment_intent, 
+      amount: session.amount_total / 100,     
+  }
+   
+  
 
+  const paid = await memberShipCollection.insertOne(paidMemberShip)
+  res.send(paid);
+ 
+  })
+
+ app.get("/events", async (req, res) => {
+  const { search, category, sort } = req.query;
+
+  let query = {};
+
+  if (search) {
+    query.title = { $regex: search, $options: "i" };
+  }
+
+  if (category) {
+    query.category = category;
+  }
+
+  let sorting = { createdAt: -1 }; 
+
+  if (sort === "oldest") sorting = { createdAt: 1 };
+  if (sort === "date") sorting = { eventDate: 1 };
+
+  const events = await eventsCollection.find(query).sort(sorting).toArray();
+
+  res.send(events);
+});
 
 
 

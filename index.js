@@ -180,6 +180,8 @@ const client = new MongoClient(uri, {
  app.get("/events", async (req, res) => {
   const { search, category, sort } = req.query;
 
+    const db =  client.db("Club")
+    const eventsCollection = db.collection("events")
   let query = {};
 
   if (search) {
@@ -200,8 +202,93 @@ const client = new MongoClient(uri, {
   res.send(events);
 });
 
+  app.get("/events/:id", async(req,res)=>{
+        
+       const id =req.params.id
+
+       const db =  client.db("Club")
+    const eventsCollection = db.collection("events")
+    const result = await eventsCollection.findOne({_id:new ObjectId(id)})
+    res.send(result)
+
+     })
+
+     app.post('/event/create-checkout-session', async (req, res) => {
+    const eventInfo = req.body
+     const amount = parseInt(eventInfo.cost *100)
+  const session = await stripe.checkout.sessions.create({
+   
+        line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            unit_amount: amount,
+            product_data: {
+              name: eventInfo.title,}
+          },
+          quantity: 1   
+        }
+      ],
+   
+     metadata:{
+       eventId:eventInfo.eventId
+    },
+    customer_email:eventInfo.email,
+    mode: 'payment',
+    success_url: `${YOUR_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+  });
+
+   res.send({ url :session.url})
+});
+ 
+app.get("/event/payment-success",async(req,res)=>{
+ const sessionId = req.query.session_id;
+
+  const db = client.db("Club");
+  const eventsCollection = db.collection("events");
+
+  const eventRegisterCollection = db.collection("eventRegistrations")
+
+  
+  const session = await stripe.checkout.sessions.retrieve(sessionId);
+  if (session.payment_status !== "paid") {
+    return res.status(400).send({ error: "Payment not completed" });
+  }
+
+  const event = await eventsCollection.findOne({
+    _id: new ObjectId(session.metadata.eventId)
+  });
+
+  if (!event) {
+    return res.status(404).send({ error: "Event not found" });
+  }
+  const existing = await eventRegisterCollection.findOne({
+    eventId: session.metadata.eventId,
+    userEmail: session.customer_email
+  });
+ 
+  if (existing) {
+    return res.status(200).send({ message: "Payment already recorded" });
+  }
 
 
+  const paidEventShip ={
+      userEmail: session.customer_email,
+      eventId: session.metadata.eventId,
+    
+      clubId: event.clubId,
+      status: "registered",
+      joinedAt: new Date(),
+      eventPaymentId: session.payment_intent, 
+      amount: session.amount_total / 100,     
+  }
+   
+  
 
+  const paid = await eventRegisterCollection.insertOne(paidEventShip)
+  res.send(paid);
+ 
+  })
+ 
  }
 run().catch(console.dir);

@@ -158,7 +158,7 @@ const client = new MongoClient(uri, {
   const db = client.db("Club");
 
   const memberShipCollection = db.collection("memberships")
-
+  const paymentRecord = db.collection("payments")
   const session = await stripe.checkout.sessions.retrieve(sessionId);
   if (session.payment_status !== "paid") {
     return res.status(400).send({ error: "Payment not completed" });
@@ -184,10 +184,19 @@ const client = new MongoClient(uri, {
       amount: session.amount_total / 100,     
   }
    
+ const payment = {
+ userEmail: session.customer_email,
+ amount: session.amount_total / 100,
+ type: "membership",
+ clubId: session.metadata.clubId,
+ status: "paid",
+ createdAt: new Date(),
+  transactionId: session.payment_intent,
+}
   
-
+  const record = await paymentRecord.insertOne(payment)
   const paid = await memberShipCollection.insertOne(paidMemberShip)
-  res.send(paid);
+  res.send(paid,record);
  
   })
 
@@ -263,6 +272,7 @@ app.get("/event/payment-success",async(req,res)=>{
   const eventsCollection = db.collection("events");
 
   const eventRegisterCollection = db.collection("eventRegistrations")
+    const paymentRecord = db.collection("payments")
 
   
   const session = await stripe.checkout.sessions.retrieve(sessionId);
@@ -298,10 +308,19 @@ app.get("/event/payment-success",async(req,res)=>{
       amount: session.amount_total / 100,     
   }
    
-  
+  const payment = {
+ userEmail: session.customer_email,
+ amount: session.amount_total / 100,
+ type: "event",
+ eventId: session.metadata.eventId,
+ status: "paid",
+ createdAt: new Date(),
+  transactionId: session.payment_intent,
+}
+    const record = await paymentRecord.insertOne(payment)
 
   const paid = await eventRegisterCollection.insertOne(paidEventShip)
-  res.send(paid);
+  res.send(paid,record);
  
   })
  
@@ -363,34 +382,11 @@ app.get("/event/payment-success",async(req,res)=>{
 
 app.get("/payments", async (req, res) => {
  
+  const db = client.db("Club");
+     
+   const paymentRecord = db.collection("payments")
 
-  
-     const db = client.db("Club");
-      const memberShipCollection = db.collection("memberships")
-
-    const eventRegisterCollection = db.collection("eventRegistrations")
-    const membershipPayments = await memberShipCollection.find({ paymentId: { $exists: true } }).toArray();
-
-    const eventPayments = await eventRegisterCollection.find({ eventPaymentId: { $exists: true } }).toArray();
-
-    const allPayments = [
-      ...membershipPayments.map((m) => ({
-        userEmail: m.userEmail,
-        amount: m.amount,
-        type: "membership",
-        clubName: m.clubId,
-        date: m.joinedAt,
-        transactionId: m.paymentId,
-      })),
-      ...eventPayments.map((e) => ({
-        userEmail: e.userEmail,
-        amount: e.amount,
-        type: "event",
-        clubName: e.clubId,
-        date: e.joinedAt,
-        transactionId: e.eventPaymentId, 
-      })),
-    ];
+  const allPayments= await paymentRecord.find({}).toArray()
 
     res.send(allPayments);
  

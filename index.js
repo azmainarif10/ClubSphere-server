@@ -43,6 +43,20 @@ const client = new MongoClient(uri, {
 
      })
 
+ app.get("/users", async(req,res)=>{
+      
+          const db =  client.db("Club")
+       
+   const userCollection = db.collection("users")
+     
+   const result = await userCollection.find({}).toArray()
+   res.send(result)
+
+     })
+  
+      
+
+
      app.post("/users", async(req,res)=>{
         const user = req.body
         user.role ="member"
@@ -231,11 +245,12 @@ const client = new MongoClient(uri, {
       ],
    
      metadata:{
-       eventId:eventInfo.eventId
+       eventId:eventInfo.eventId,
+       clubId:eventInfo.clubId,
     },
     customer_email:eventInfo.email,
     mode: 'payment',
-    success_url: `${YOUR_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+  success_url: `${YOUR_DOMAIN}/event/payment-success?session_id={CHECKOUT_SESSION_ID}`,
   });
 
    res.send({ url :session.url})
@@ -276,7 +291,7 @@ app.get("/event/payment-success",async(req,res)=>{
       userEmail: session.customer_email,
       eventId: session.metadata.eventId,
     
-      clubId: event.clubId,
+      clubId:session.metadata.clubId ,
       status: "registered",
       joinedAt: new Date(),
       eventPaymentId: session.payment_intent, 
@@ -290,5 +305,96 @@ app.get("/event/payment-success",async(req,res)=>{
  
   })
  
+   app.post("/event-registered", async(req,res)=>{
+        
+       const register= req.body
+       register.joinedAt = new Date()
+   
+     const db =  client.db("Club")
+      const eventRegisterCollection = db.collection("eventRegistrations")
+
+    const result = await eventRegisterCollection.insertOne(register)
+    res.send(result)
+
+     })
+
+    
+    app.get("/user/:email/role",  async(req,res)=>{
+
+
+  const email = req.params.email ;
+
+   const db = client.db("Club")
+  const userCollection = db.collection("users")
+ 
+       const user = await userCollection.findOne({email:email});
+
+   res.send({ role : user?.role || "users"})
+
+
+  })
+
+ app.patch("/user/update-role/:id",async(req,res)=>{
+
+  const id = req.params.id
+    const { role } = req.body;
+  const db = client.db("Club")
+ 
+   const userCollection = db.collection("users")
+
+   
+ 
+  const result = await userCollection.updateOne({_id:new ObjectId(id)},{$set:{role}})
+   res.send(result)
+
+  })
+
+  app.patch("/club/update-status/:id",async(req,res)=>{
+
+  const id = req.params.id
+    const { status } = req.body;
+  const db = client.db("Club")
+ 
+  const clubCollection = db.collection("clubs")
+  const result = await clubCollection.updateOne({_id:new ObjectId(id)},{$set:{status}})
+   res.send(result)
+
+  })
+
+app.get("/payments", async (req, res) => {
+ 
+
+  
+     const db = client.db("Club");
+      const memberShipCollection = db.collection("memberships")
+
+    const eventRegisterCollection = db.collection("eventRegistrations")
+    const membershipPayments = await memberShipCollection.find({ paymentId: { $exists: true } }).toArray();
+
+    const eventPayments = await eventRegisterCollection.find({ eventPaymentId: { $exists: true } }).toArray();
+
+    const allPayments = [
+      ...membershipPayments.map((m) => ({
+        userEmail: m.userEmail,
+        amount: m.amount,
+        type: "membership",
+        clubName: m.clubId,
+        date: m.joinedAt,
+        transactionId: m.paymentId,
+      })),
+      ...eventPayments.map((e) => ({
+        userEmail: e.userEmail,
+        amount: e.amount,
+        type: "event",
+        clubName: e.clubId,
+        date: e.joinedAt,
+        transactionId: e.eventPaymentId, 
+      })),
+    ];
+
+    res.send(allPayments);
+ 
+});
+
  }
 run().catch(console.dir);

@@ -484,29 +484,67 @@ app.get("/my-payments", async (req, res) => {
 
 app.get("/my-clubs", async (req, res) => {
   const email = req.query.email;
-  const clubs = await clubCollection.find({ managerEmail: email }).toArray();
-  res.send(clubs);
+  const db = client.db("Club")
+  const clubCollection = db.collection("clubs")
+
+  const result = await clubCollection.find({ managerEmail: email }).toArray();
+  res.send(result);
 });
 
 app.post("/clubs", async (req, res) => {
+  const db = client.db("Club")
+ const clubCollection = db.collection("clubs")
+
   const result = await clubCollection.insertOne(req.body);
   res.send(result);
 });
 
-app.put("/clubs/:id", async (req, res) => {
+app.patch("/clubs/:id", async (req, res) => {
   const id = req.params.id;
+  console.log(id)
+  const db = client.db("Club")
+  const update = req.body
+  console.log(update)
+  const clubCollection = db.collection("clubs")
+
   const result = await clubCollection.updateOne(
     { _id: new ObjectId(id) },
-    { $set: req.body }
+    { $set: update }
   );
   res.send(result);
 });
 
 app.delete("/clubs/:id", async (req, res) => {
   const id = req.params.id;
+  const db = client.db("Club")
+  const clubCollection = db.collection("clubs")
+
   const result = await clubCollection.deleteOne({ _id: new ObjectId(id) });
   res.send(result);
 });
+
+
+ app.get("/manager/club-members", async (req, res) => {
+  const managerEmail = req.query.email;
+  const db = client.db("Club");
+
+  const clubs = await db.collection("clubs").find({ managerEmail }).toArray();
+  const clubIds = clubs.map(c => c._id.toString());
+
+  const memberships = await db.collection("memberships").find({ clubId: { $in: clubIds } }).toArray();
+
+ 
+  const result = memberships.map(m => ({
+    memberEmail: m.userEmail,
+    clubName: clubs.find(c => c._id.toString() === m.clubId)?.clubName || "Unknown",
+    status: m.status,
+    joinedAt: m.joinedAt
+  }));
+
+  res.send(result);
+});
+
+
 
  }
 run().catch(console.dir);

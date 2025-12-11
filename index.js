@@ -482,5 +482,31 @@ app.get("/my-payments", async (req, res) => {
 });
 
 
+app.get("/my-clubs", async (req, res) => {
+  const email = req.query.email;
+  const clubs = await clubCollection.find({ managerEmail: email }).toArray();
+  res.send(clubs);
+});
+
+app.post("/clubs", async (req, res) => {
+  const result = await clubCollection.insertOne(req.body);
+  res.send(result);
+});
+
+app.put("/clubs/:id", async (req, res) => {
+  const id = req.params.id;
+  const result = await clubCollection.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: req.body }
+  );
+  res.send(result);
+});
+
+app.delete("/clubs/:id", async (req, res) => {
+  const id = req.params.id;
+  const result = await clubCollection.deleteOne({ _id: new ObjectId(id) });
+  res.send(result);
+});
+
  }
 run().catch(console.dir);

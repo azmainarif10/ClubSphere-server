@@ -131,9 +131,9 @@ const client = new MongoClient(uri, {
     
  app.get("/memberships", async(req,res)=>{
       
-
+  const userEmail = req.query.email
     const db =  client.db("Club")
-  const memberships = await db.collection("memberships").find().toArray();
+  const memberships = await db.collection("memberships").find({userEmail}).toArray();
   const clubs = await db.collection("clubs").find().toArray();
 
     const result = memberships.map((m) => {
@@ -459,23 +459,21 @@ app.get("/payments", async (req, res) => {
   res.send(result);
 });
 
-app.get("/member/my-events", async (req, res) => {
+app.get("/my-payments", async (req, res) => {
   const userEmail = req.query.email; 
   const db = client.db("Club");
 
-  const eventRegs = await db.collection("eventRegistrations").find({ userEmail }).toArray();
+  const myPays = await db.collection("payments").find({ userEmail }).toArray();
 
   const clubs = await db.collection("clubs").find().toArray();
-  const events = await db.collection("events").find().toArray();
-
-  const result = eventRegs.map((reg) => {
-    const event = events.find((e) => e._id.toString() === reg.eventId);
+  
+  const result = myPays.map((reg) => {
+   
     const club = clubs.find((c) => c._id.toString() === reg.clubId);
 
     return {
       ...reg,
-      eventTitle: event?.title || "Unknown",
-      eventDate: event?.eventDate || new Date(),
+     
       clubName: club?.clubName || "Unknown",
     };
   });

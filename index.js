@@ -54,7 +54,13 @@ const client = new MongoClient(uri, {
 
      })
   
-      
+      app.get("/admin/clubs", async (req, res) => {
+  const db = client.db("Club");
+  const clubCollection = db.collection("clubs");
+
+  const allClubs = await clubCollection.find({}).toArray(); 
+  res.send(allClubs);
+});
 
 
      app.post("/users", async(req,res)=>{
@@ -78,7 +84,7 @@ const client = new MongoClient(uri, {
         
         const { search = "", category = "" } = req.query;
 
-    let query = {};
+    let query = {status: "approved" };
 
     if (search) {
       query.clubName = { $regex: search, $options: "i" }; 
@@ -108,12 +114,12 @@ const client = new MongoClient(uri, {
      })
 
       app.post("/memberships", async(req,res)=>{
-        
-       const memberShip= req.body
-       memberShip.joinedAt = new Date()
-
-    const db =  client.db("Club")
+        const db =  client.db("Club")
     const memberShipCollection = db.collection("memberships")
+              const memberShip= req.body
+
+ 
+    
     const result = await memberShipCollection.insertOne(memberShip)
     res.send(result)
 
@@ -123,6 +129,26 @@ const client = new MongoClient(uri, {
        console.log(error)
     }
     
+ app.get("/memberships", async(req,res)=>{
+      
+
+    const db =  client.db("Club")
+  const memberships = await db.collection("memberships").find().toArray();
+  const clubs = await db.collection("clubs").find().toArray();
+
+    const result = memberships.map((m) => {
+    const club = clubs.find((c) => c._id.toString() === m.clubId);
+
+    return {
+      ...m,
+      clubName: club?.clubName || "Unknown",
+      location: club?.location || "Unknown",
+    };
+  });
+    res.send(result)
+
+     })
+
   app.post('/create-checkout-session', async (req, res) => {
     const clubInfo = req.body
      const amount = parseInt(clubInfo.cost *100)
@@ -156,7 +182,6 @@ const client = new MongoClient(uri, {
  const sessionId = req.query.session_id;
 
   const db = client.db("Club");
-
   const memberShipCollection = db.collection("memberships")
   const paymentRecord = db.collection("payments")
   const session = await stripe.checkout.sessions.retrieve(sessionId);
@@ -173,7 +198,7 @@ const client = new MongoClient(uri, {
     return res.status(200).send({ message: "Payment already recorded" });
   }
 
-
+ 
   const paidMemberShip ={
       userEmail: session.customer_email,
       clubId: session.metadata.clubId,
@@ -391,6 +416,73 @@ app.get("/payments", async (req, res) => {
     res.send(allPayments);
  
 });
+
+
+ app.get("/admin/data", async (req, res) => {
+  try {
+    const db = client.db("Club");
+
+    const users = await db.collection("users").find().toArray();
+    const clubs = await db.collection("clubs").find().toArray();
+    const memberships = await db.collection("memberships").find().toArray();
+    const events = await db.collection("events").find().toArray();
+    const payments = await db.collection("payments").find().toArray();
+
+    res.send({users,clubs,memberships,events,payments});
+  } catch (error) {
+    console.log(error);
+    res.status(500).send({ error: "Failed to load admin data" });
+  }
+});
+
+ app.get("/member/my-events", async (req, res) => {
+  const userEmail = req.query.email; 
+  const db = client.db("Club");
+
+  const eventRegs = await db.collection("eventRegistrations").find({ userEmail }).toArray();
+
+  const clubs = await db.collection("clubs").find().toArray();
+  const events = await db.collection("events").find().toArray();
+
+  const result = eventRegs.map((reg) => {
+    const event = events.find((e) => e._id.toString() === reg.eventId);
+    const club = clubs.find((c) => c._id.toString() === reg.clubId);
+
+    return {
+      ...reg,
+      eventTitle: event?.title || "Unknown",
+      eventDate: event?.eventDate || new Date(),
+      clubName: club?.clubName || "Unknown",
+    };
+  });
+
+  res.send(result);
+});
+
+app.get("/member/my-events", async (req, res) => {
+  const userEmail = req.query.email; 
+  const db = client.db("Club");
+
+  const eventRegs = await db.collection("eventRegistrations").find({ userEmail }).toArray();
+
+  const clubs = await db.collection("clubs").find().toArray();
+  const events = await db.collection("events").find().toArray();
+
+  const result = eventRegs.map((reg) => {
+    const event = events.find((e) => e._id.toString() === reg.eventId);
+    const club = clubs.find((c) => c._id.toString() === reg.clubId);
+
+    return {
+      ...reg,
+      eventTitle: event?.title || "Unknown",
+      eventDate: event?.eventDate || new Date(),
+      clubName: club?.clubName || "Unknown",
+    };
+  });
+
+  res.send(result);
+});
+
 
  }
 run().catch(console.dir);

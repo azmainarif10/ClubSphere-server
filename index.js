@@ -8,15 +8,67 @@ app.use(express.json())
 app.use(cors())
 
 
+const admin = require("firebase-admin");
+
+const decoded = Buffer.from(process.env.FireBase_Token, "base64").toString("utf8");
+const serviceAccount = JSON.parse(decoded);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+
+
 const stripe = require('stripe')(process.env.Stipe_Key);
  const YOUR_DOMAIN="http://localhost:5173";
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@ae.lom2zra.mongodb.net/?appName=aE`;
 
 
+const verifyFireToken = async (req,res,next)=>{
 
+ const authorization = req.headers.authorization
+  if(!authorization){
+  return  res.status(403).send({message:"unauthorized access"})
+  }
+const token = authorization.split(' ')[1]
+   if(!token){
+    return res.status(403).send({message:"unauthorized access"})
+  }
+  
+    try{
+   const decoded = await admin.auth().verifyIdToken(token)
+     req.token_email = decoded.email
+          next()
+    }catch(error){
+             console.error("Firebase Token Verification Error:", error.code, error.message);
+        return res.status(401).send({ 
+            message: "Unauthorized: Invalid or expired token.",
+            error_code: error.code 
+        });
+        }
+
+
+
+ }
 
  
+ const verifyRole = (role) => {
+  return async (req, res, next) => {
+
+    const db = req.app.locals.db;
+    const email = req.token_email;
+
+    const user = await db.collection("users").findOne({ email });
+
+    if (!user || user.role !== role) {
+      return res.status(403).send({ error: "Forbidden access" });
+    }
+
+    next();
+  };
+};
+
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -36,7 +88,8 @@ const client = new MongoClient(uri, {
           // await client.db("billdb").command({ping:1})
      console.log("Pinged your deployment. You successfully connected to MongoDB!");
      
-     
+     app.locals.db = client.db("Club");
+
      app.listen(PORT ,()=>{
         
         console.log(`Express Server is running on http://localhost:${PORT}`);
@@ -54,7 +107,7 @@ const client = new MongoClient(uri, {
 
      })
   
-      app.get("/admin/clubs", async (req, res) => {
+      app.get("/admin/clubs", verifyFireToken, verifyRole("admin"), async (req, res) => {
   const db = client.db("Club");
   const clubCollection = db.collection("clubs");
 
@@ -79,6 +132,8 @@ const client = new MongoClient(uri, {
    res.send(result)
 
      })
+
+
 
       app.get("/clubs", async(req,res)=>{
         
@@ -116,11 +171,22 @@ const client = new MongoClient(uri, {
       app.post("/memberships", async(req,res)=>{
         const db =  client.db("Club")
     const memberShipCollection = db.collection("memberships")
+              const clubCollection = db.collection("clubs")
+
               const memberShip= req.body
 
- 
-    
-    const result = await memberShipCollection.insertOne(memberShip)
+           
+              
+     if (club.membershipFee === 0) {
+    await clubCollection.updateOne(
+      { _id: club._id },
+      { $inc: { memberCount: 1 } }
+    );
+  }
+   
+  
+   
+   
     res.send(result)
 
      })
@@ -149,7 +215,7 @@ const client = new MongoClient(uri, {
 
      })
 
-  app.post('/create-checkout-session', async (req, res) => {
+  app.post('/create-checkout-session', verifyFireToken, async (req, res) => {
     const clubInfo = req.body
      const amount = parseInt(clubInfo.cost *100)
   const session = await stripe.checkout.sessions.create({
@@ -218,7 +284,10 @@ const client = new MongoClient(uri, {
  createdAt: new Date(),
   transactionId: session.payment_intent,
 }
-  
+  await db.collection("clubs").updateOne(
+  { _id: new ObjectId(session.metadata.clubId) },
+  { $inc: { memberCount: 1 } } 
+);
   const record = await paymentRecord.insertOne(payment)
   const paid = await memberShipCollection.insertOne(paidMemberShip)
   res.send(paid,record);
@@ -250,6 +319,25 @@ const client = new MongoClient(uri, {
   res.send(events);
 });
 
+ app.get("/manager/events", verifyFireToken, verifyRole("clubManager"), async (req, res) => {
+  const { managerEmail } = req.query;
+
+    const db =  client.db("Club")
+     const clubs = await db.collection("clubs").find({ managerEmail }).toArray();
+     const clubIds = clubs.map(c => c._id.toString());
+
+   
+ 
+   const events = await db.collection("events").find({clubId: { $in: clubIds }}).toArray();
+
+  const result = events.map(event => ({
+    ...event,
+    clubName: clubs.find(c => c._id.toString() === event.clubId)?.clubName || "Unknown"
+  }));
+
+  res.send(result);
+});
+
   app.get("/events/:id", async(req,res)=>{
         
        const id =req.params.id
@@ -261,7 +349,7 @@ const client = new MongoClient(uri, {
 
      })
 
-     app.post('/event/create-checkout-session', async (req, res) => {
+     app.post('/event/create-checkout-session', verifyFireToken, async (req, res) => {
     const eventInfo = req.body
      const amount = parseInt(eventInfo.cost *100)
   const session = await stripe.checkout.sessions.create({
@@ -378,7 +466,7 @@ app.get("/event/payment-success",async(req,res)=>{
 
   })
 
- app.patch("/user/update-role/:id",async(req,res)=>{
+ app.patch("/user/update-role/:id",  verifyFireToken, verifyRole("admin"), async(req,res)=>{
 
   const id = req.params.id
     const { role } = req.body;
@@ -393,7 +481,7 @@ app.get("/event/payment-success",async(req,res)=>{
 
   })
 
-  app.patch("/club/update-status/:id",async(req,res)=>{
+  app.patch("/club/update-status/:id", verifyFireToken, verifyRole("admin"), async(req,res)=>{
 
   const id = req.params.id
     const { status } = req.body;
@@ -405,7 +493,7 @@ app.get("/event/payment-success",async(req,res)=>{
 
   })
 
-app.get("/payments", async (req, res) => {
+app.get("/payments", verifyFireToken, verifyRole("admin"), async (req, res) => {
  
   const db = client.db("Club");
      
@@ -418,7 +506,7 @@ app.get("/payments", async (req, res) => {
 });
 
 
- app.get("/admin/data", async (req, res) => {
+ app.get("/admin/data", verifyFireToken,verifyRole("admin"), async (req, res) => {
   try {
     const db = client.db("Club");
 
@@ -491,15 +579,21 @@ app.get("/my-clubs", async (req, res) => {
   res.send(result);
 });
 
-app.post("/clubs", async (req, res) => {
+app.post("/clubs", verifyFireToken, verifyRole("clubManager"), async (req, res) => {
   const db = client.db("Club")
- const clubCollection = db.collection("clubs")
+ const clubCollection = db.collection("clubs") 
 
-  const result = await clubCollection.insertOne(req.body);
+   const club = {
+    ...req.body,
+    memberCount: 0,       
+    createdAt: new Date()
+  };
+
+  const result = await clubCollection.insertOne(club);
   res.send(result);
 });
 
-app.patch("/clubs/:id", async (req, res) => {
+app.patch("/clubs/:id", verifyFireToken, verifyRole("clubManager"), async (req, res) => {
   const id = req.params.id;
   console.log(id)
   const db = client.db("Club")
@@ -514,7 +608,7 @@ app.patch("/clubs/:id", async (req, res) => {
   res.send(result);
 });
 
-app.delete("/clubs/:id", async (req, res) => {
+app.delete("/clubs/:id", verifyFireToken, verifyRole("clubManager"), async (req, res) => {
   const id = req.params.id;
   const db = client.db("Club")
   const clubCollection = db.collection("clubs")
@@ -523,8 +617,28 @@ app.delete("/clubs/:id", async (req, res) => {
   res.send(result);
 });
 
+ app.patch("/manager/events/:id", verifyFireToken, verifyRole("clubManager"), async (req, res) => {
+  const id = req.params.id;
+  const db = client.db("Club")
+  const update = req.body
+     const eventsCollection = db.collection("events")
 
- app.get("/manager/club-members", async (req, res) => {
+  const result = await eventsCollection.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: update }
+  );
+  res.send(result);
+});
+
+app.delete("/manager/events/:id", verifyFireToken, verifyRole("clubManager"), async (req, res) => {
+  const id = req.params.id;
+  const db = client.db("Club")
+  const eventsCollection = db.collection("events")
+
+  const result = await eventsCollection.deleteOne({ _id: new ObjectId(id) });
+  res.send(result);
+});
+ app.get("/manager/club-members",  verifyFireToken, verifyRole("clubManager"), async (req, res) => {
   const managerEmail = req.query.email;
   const db = client.db("Club");
 
@@ -535,6 +649,7 @@ app.delete("/clubs/:id", async (req, res) => {
 
  
   const result = memberships.map(m => ({
+    _id: m._id,
     memberEmail: m.userEmail,
     clubName: clubs.find(c => c._id.toString() === m.clubId)?.clubName || "Unknown",
     status: m.status,
@@ -542,6 +657,81 @@ app.delete("/clubs/:id", async (req, res) => {
   }));
 
   res.send(result);
+});
+
+ app.patch("/membership/:id/status", async (req, res) => {
+  const id = req.params.id;
+  const { status } = req.body;
+  const db = client.db("Club");
+
+  const result = await db.collection("memberships").updateOne(
+    { _id: new ObjectId(id) },
+    { $set: { status } }
+  );
+  res.send(result);
+});
+
+
+ app.get("/manager/event-registration", verifyFireToken, verifyRole("clubManager"), async(req,res)=>{
+      const managerEmail = req.query.email;
+
+    const db =  client.db("Club")
+    const clubs = await db.collection("clubs").find({ managerEmail }).toArray();
+  const clubIds = clubs.map(c => c._id.toString());
+
+  const events = await db.collection("events").find({ clubId: { $in: clubIds } }).toArray();
+  const eventIds = events.map(c => c._id.toString());
+   const eventRegister  = await db.collection("eventRegistrations").find({ eventId: { $in: eventIds } }).toArray();
+ 
+   const result = eventRegister.map(m => ({
+    _id: m._id,
+    memberEmail: m.userEmail,
+    clubName: clubs.find(c => c._id.toString() === m.clubId)?.clubName || "Unknown",
+    status: m.status,
+    joinedAt: m.joinedAt
+  }));
+  
+  res.send(result)
+ })
+
+ app.get("/manager/overview", verifyFireToken, verifyRole("clubManager"), async (req, res) => {
+  const managerEmail = req.query.email;
+  const db = client.db("Club");
+
+  try {
+    const clubs = await db
+      .collection("clubs")
+      .find({ managerEmail })
+      .toArray();
+
+    const clubIds = clubs.map(c => c._id.toString());
+
+    const totalMembers = await db.collection("memberships").countDocuments({ clubId: { $in: clubIds } });
+
+    const totalEvents = await db.collection("events").countDocuments({ clubId: { $in: clubIds } });
+
+    const payments = await db.collection("payments").find({ clubId: { $in: clubIds } }).toArray();
+
+    const totalRevenue = payments.reduce( (sum, p) => sum + (p.amount || 0), 0);
+
+    res.send({
+      totalClubs: clubs.length,
+      totalMembers,
+      totalEvents,
+      totalRevenue,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Server Error" });
+  }
+});
+ 
+ app.get("/home/clubs/featured", async (req, res) => {
+  const db = client.db("Club");
+
+  const clubs = await db.collection("clubs").find({ status: "approved" }).sort({ memberCount: -1 }) .limit(6).toArray();
+
+  res.send(clubs);
 });
 
 

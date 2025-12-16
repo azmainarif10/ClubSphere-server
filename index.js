@@ -106,6 +106,12 @@ const client = new MongoClient(uri, {
    res.send(result)
 
      })
+
+     app.get("/user/:email/role/update-profile", async (req, res) => {
+  const email = req.params.email;
+  const user = await userCollection.findOne({ email });
+  res.send({ role: user?.role || "member" });
+});
   
       app.get("/admin/clubs", verifyFireToken, verifyRole("admin"), async (req, res) => {
   const db = client.db("Club");
@@ -426,6 +432,7 @@ app.get("/event/payment-success",async(req,res)=>{
  amount: session.amount_total / 100,
  type: "event",
  eventId: session.metadata.eventId,
+ clubId: session.metadata.clubId, 
  status: "paid",
  createdAt: new Date(),
   transactionId: session.payment_intent,
@@ -523,6 +530,16 @@ app.get("/payments", verifyFireToken, verifyRole("admin"), async (req, res) => {
   }
 });
 
+ app.get("/club/:id/stats", verifyFireToken, verifyRole("admin"), async (req, res) => {
+  const clubId = req.params.id;
+  const db = client.db("Club");
+
+  const memberCount = await db.collection("memberships").countDocuments({ clubId });
+  const eventCount = await db.collection("events").countDocuments({ clubId });
+
+  res.send({ memberCount, eventCount });
+});
+
  app.get("/member/my-events", async (req, res) => {
   const userEmail = req.query.email; 
   const db = client.db("Club");
@@ -585,6 +602,7 @@ app.post("/clubs", verifyFireToken, verifyRole("clubManager"), async (req, res) 
 
    const club = {
     ...req.body,
+    status: "pending", 
     memberCount: 0,       
     createdAt: new Date()
   };
@@ -638,6 +656,26 @@ app.delete("/manager/events/:id", verifyFireToken, verifyRole("clubManager"), as
   const result = await eventsCollection.deleteOne({ _id: new ObjectId(id) });
   res.send(result);
 });
+
+app.post("/events", verifyFireToken, verifyRole("clubManager"), async (req, res) => {
+  try {
+    const db = client.db("Club");
+    const eventsCollection = db.collection("events");
+
+    const event = {
+      ...req.body,
+      createdAt: new Date(),
+    };
+
+    const result = await eventsCollection.insertOne(event);
+    res.send(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ error: "Failed to create event" });
+  }
+});
+
+
  app.get("/manager/club-members",  verifyFireToken, verifyRole("clubManager"), async (req, res) => {
   const managerEmail = req.query.email;
   const db = client.db("Club");
@@ -659,7 +697,7 @@ app.delete("/manager/events/:id", verifyFireToken, verifyRole("clubManager"), as
   res.send(result);
 });
 
- app.patch("/membership/:id/status", async (req, res) => {
+ app.patch("/membership/:id/status",  verifyFireToken, verifyRole("clubManager"),  async (req, res) => {
   const id = req.params.id;
   const { status } = req.body;
   const db = client.db("Club");
